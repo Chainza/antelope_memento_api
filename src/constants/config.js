@@ -1,4 +1,4 @@
-module.exports = constant = {
+module.exports = {
     STATUS_SUCCESS: 'success',
     STATUS_FAILURE: 'failure',
     DATA_SEND_ERROR: 'Data send error',
@@ -22,4 +22,20 @@ module.exports = constant = {
 
     MYSQL_DB: 'MYSQL',
     POSTGRES_DB: 'POSTGRES',
+
+    EVENT: {
+        CONNECTION: 'connection',
+        DISCONNECT: 'disconnect',
+        ERROR: 'error',
+
+        TRANSACTIONS_HISTORY: 'transactions_history',
+    },
+    EVENT_ERRORS: {
+        INVALID_ARGS: 'Invalid arguments',
+        INVALID_ACCOUNTS: 'Invalid accounts',
+        INVALID_START_BLOCK: 'Invalid start_block',
+        INVALID_IRREVERSIBLE: 'Invalid irreversible',
+        START_BLOCK_BEHIND_LAST_IRREVERSIBLE:
+            'start_block is behind the last irreversible block',
+    },
 };

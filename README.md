@@ -150,6 +150,136 @@ The following queries are supported:
 -   `transaction`: returns transaction_status
     -   `trx_id: String!`
 
+## Web Sockets
+
+The API supports Web Sockets for real-time updates. We use socket.io for the Web Socket interface. The client can subscribe to the `transactions_history` event, which start emitting the transaction data based on the provided parameters.
+
+Example of a client-side javascript code:
+
+```javascript
+// npm i socket.io-client
+
+import { io } from 'socket.io-client';
+
+const socket = io('https://memento.eu.eosamsterdam.net', {
+    path: '/wax/socket.io',
+    transports: ['websocket'],
+});
+
+socket.on('connect', () => {
+    console.log('connected to memento-api websocket');
+
+    // subscribe to the transactions_history event after the connection is established
+    socket.emit('transactions_history', {
+        accounts: ['account1', 'account2'], // array of account names, required
+        start_block: 298284392, // start reading from the block_num, optional (head block is used by default)
+        irreversible: true, // only irreversible transactions, optional (false by default)
+    });
+});
+
+socket.on('disconnect', () => {
+    console.log('disconnected from memento-api websocket');
+});
+
+// start receiving the transaction data
+socket.on('transactions_history', (data, ack) => {
+    console.log(data);
+    ack(); // acknowledge the receipt of the data, required (otherwise the server will stop sending data)
+});
+
+socket.on('error', (error) => {
+    console.error(error);
+});
+```
+
+Example of 'transactions_history' event data:
+
+```json
+[
+    {
+        "block_num": "298284392",
+        "type": "trace",
+        "data": {
+            "trace": {
+                "block_num": "298284392",
+                "block_timestamp": "2024-03-16T18:47:03.500",
+                "trace": {
+                    "id": "8efb8c0b850042c2c5801fa85532c46cc3cf9fdd49e1dbf6e8af28854a8ae7e1",
+                    "status": "executed",
+                    "cpu_usage_us": "436",
+                    "net_usage_words": "24",
+                    "elapsed": "350",
+                    "net_usage": "192",
+                    "scheduled": "false",
+                    "action_traces": [
+                        {
+                            "action_ordinal": "1",
+                            "creator_action_ordinal": "0",
+                            "receipt": {
+                                "receiver": "novarallytok",
+                                "act_digest": "de17ddb2c14e205fb914664eb7b5dbb852e62fc56af645786be7a4b2569763c3",
+                                "global_sequence": "88656190165",
+                                "recv_sequence": "9081688",
+                                "auth_sequence": [
+                                    {
+                                        "account": "n2jbm.wam",
+                                        "sequence": "59458"
+                                    }
+                                ],
+                                "code_sequence": "1",
+                                "abi_sequence": "1"
+                            },
+                            "receiver": "novarallytok",
+                            "act": {
+                                "account": "novarallytok",
+                                "name": "transfer",
+                                "authorization": [
+                                    {
+                                        "actor": "n2jbm.wam",
+                                        "permission": "active"
+                                    }
+                                ],
+                                "data": {
+                                    "from": "n2jbm.wam",
+                                    "to": "swap.alcor",
+                                    "quantity": "992426 SNAKGAS",
+                                    "memo": "swapexactin#277#n2jbm.wam#1.53894783 WAX@eosio.token#0"
+                                }
+                            },
+                            "context_free": "false",
+                            "elapsed": "66",
+                            "console": "11328360222704429312INFO quantity.amount: 992426 @ 18:47:3 novarallytok.cpp[114](transfer)\n",
+                            "account_ram_deltas": [],
+                            "except": "",
+                            "error_code": null,
+                            "return_value": ""
+                        }
+                    ],
+                    "account_ram_delta": null,
+                    "except": "",
+                    "error_code": null,
+                    "failed_dtrx_trace": [],
+                    "partial": {
+                        "expiration": { "utc_seconds": "1710615175" },
+                        "ref_block_num": "30039",
+                        "ref_block_prefix": "1394522270",
+                        "max_net_usage_words": "0",
+                        "max_cpu_usage_ms": "0",
+                        "delay_sec": "0",
+                        "transaction_extensions": [],
+                        "signatures": [
+                            "SIG_K1_KAYsXVfqbgMMtsWbQUzWVsiaLkfTLBn6d1b8XnCCndo9MaZrmo35hzDzLDmabqUrmKxNHoShnsQFDao9i3FSkkqoNZdWGA",
+                            "SIG_K1_K54UkopGBj1mWswfo9h1grPT52A2T3TvYPRJiFpwBEhdFGytgS5VQboTakdUP5Co2TniTFg1PMmcUh2bM4hgpyE69muSJa"
+                        ],
+                        "context_free_data": []
+                    }
+                }
+            }
+        }
+    }
+]
+```
+
 ## Installation
 
 ```
@@ -178,6 +308,10 @@ HEALTHY_SYNC_TIME_DIFF = 15000
 API_PATH_PREFIX = wax
 CPU_CORES = 4
 MAX_RECORD_COUNT = 100
+WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD = 100
+WS_TRACE_TRANSACTIONS_LIMIT = 100
+WS_FORK_TRANSACTIONS_LIMIT = 100
+
 EOT
 
 systemctl enable memento_api@wax
@@ -198,6 +332,10 @@ HEALTHY_SYNC_TIME_DIFF = 15000
 API_PATH_PREFIX = waxpg
 CPU_CORES = 4
 MAX_RECORD_COUNT = 100
+WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD = 100
+WS_TRACE_TRANSACTIONS_LIMIT = 100
+WS_FORK_TRANSACTIONS_LIMIT = 100
+
 EOT
 
 systemctl enable memento_api@waxpg
@@ -230,6 +368,10 @@ API_PATH_PREFIX = wax           // API path prefix wax, eos, tlos
 CPU_CORES = 2   // number of cpu cores, value should not exceed max number of cores available in the system
 
 MAX_RECORD_COUNT = 10  // maximum number of records that can be returned in a single request
+
+WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD = 100 // maximum number of blocks threshold for which transactions will be emitted from websocket
+WS_TRACE_TRANSACTIONS_LIMIT = 100 // maximum number of irreversible transactions which can be emitted from websocket
+WS_FORK_TRANSACTIONS_LIMIT = 100 // maximum number of reversible transactions which can be emitted from websocket
 
 ```
 

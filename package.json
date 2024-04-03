@@ -2,10 +2,11 @@
     "name": "memento-api",
     "version": "1.0.0",
     "description": "Memento api server",
-    "main": "src/server.js",
+    "main": "src/server.ts",
     "scripts": {
-        "test": "test",
-        "start": "nodemon src/server.js"
+        "start": "node dist/server.js",
+        "dev": "nodemon src/server.ts",
+        "build": "rm -rf ./dist && tsc"
     },
     "author": "",
     "license": "ISC",
@@ -21,6 +22,17 @@
         "mysql": "^2.18.1",
         "nodemon": "^2.0.20",
         "pg": "^8.8.0",
-        "prettier": "^3.2.5"
+        "prettier": "^3.2.5",
+        "socket.io": "^4.7.5",
+        "ts-essentials": "^9.4.1"
+    },
+    "devDependencies": {
+        "@tsconfig/recommended": "^1.0.4",
+        "@types/express": "^4.17.21",
+        "@types/morgan": "^1.9.9",
+        "@types/socket.io": "^3.0.2",
+        "socket.io-client": "^4.7.5",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.4.3"
     }
 }
