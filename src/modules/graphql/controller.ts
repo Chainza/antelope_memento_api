@@ -1,14 +1,9 @@
-const { createHandler } = require('graphql-http/lib/use/express');
-const { buildSchema } = require('graphql');
-const { makeExecutableSchema } = require('@graphql-tools/schema');
+import { createHandler } from 'graphql-http/lib/use/express';
+import { makeExecutableSchema } from '@graphql-tools/schema';
 
-const txnController = require('../transactionStatus/controller.js');
-const historyController = require('../history/controller.js');
-
-const { GraphQLJSON, GraphQLJSONObject } = require('graphql-type-json');
-const constant = require('../../constants/config');
-
-var graphql = function () {};
+import * as txnController from '../transactionStatus/controller';
+import * as historyController from '../history/controller';
+import { AccountHistoryQuery, GetPosQuery } from '../history/types';
 
 // Construct a schema, using GraphQL schema language
 const sdlSchema = `
@@ -42,29 +37,29 @@ const sdlSchema = `
 
 // resolver function for each API endpoint
 const resolvers = {
-    async account_history(obj, args, context, info) {
+    async account_history(_obj: unknown, args: AccountHistoryQuery) {
         try {
-            return await historyController.graphql_account_history(args);
+            return await historyController.graphQlAccountHistory(args);
         } catch (err) {
-            console.error(err.message);
+            console.error((err as Error)?.message);
             throw err;
         }
     },
 
-    async get_pos(obj, args, context, info) {
+    async get_pos(_obj: unknown, args: GetPosQuery) {
         try {
-            return await historyController.graphql_get_pos(args);
+            return await historyController.graphQlGetPos(args);
         } catch (err) {
-            console.error(err.message);
+            console.error((err as Error)?.message);
             throw err;
         }
     },
 
-    async transaction(obj, args, context, info) {
+    async transaction(_obj: unknown, args: { trx_id: string }) {
         try {
-            return await txnController.graphql_get_transaction(args.trx_id);
+            return await txnController.graphQlGetTransaction(args.trx_id);
         } catch (err) {
-            console.error(err.message);
+            console.error((err as Error)?.message);
             throw err;
         }
     },
@@ -77,6 +72,6 @@ const schema = makeExecutableSchema({
     },
 });
 
-module.exports = createHandler({
+export default createHandler({
     schema,
 });

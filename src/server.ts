@@ -8,9 +8,11 @@ import { Server } from 'socket.io';
 import 'dotenv/config';
 
 import router from './routes/routes';
-import dbUtility from './utilities/db';
-import constant from './constants/config';
+import sequelize from './database';
+import constants from './constants/config';
 import { onConnection } from './services/webSocket';
+
+const { EVENT } = constants;
 
 const app = express();
 const server = http.createServer(app);
@@ -23,10 +25,11 @@ const io = new Server(server, {
     transports: ['websocket'],
 });
 
-io.on(constant.EVENT.CONNECTION, (socket) => {
+io.on(EVENT.CONNECTION, (socket) => {
     onConnection(socket, io);
 });
 
+// @todo: use `zod` or other library for validation
 const required_options = [
     'SERVER_BIND_IP',
     'SERVER_BIND_PORT',
@@ -37,13 +40,29 @@ const required_options = [
     'MAX_RECORD_COUNT',
     'WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD',
     'WS_TRACE_TRANSACTIONS_LIMIT',
-    'WS_FORK_TRANSACTIONS_LIMIT',
+    'WS_EVENTLOG_TRANSACTIONS_LIMIT',
     'CONNECTION_POOL',
+];
+
+const numeric_options = [
+    'SERVER_BIND_PORT',
+    'POSTGRES_DB_PORT',
+    'CONNECTION_POOL',
+    'HEALTHY_SYNC_TIME_DIFF',
+    'CPU_CORES',
+    'MAX_RECORD_COUNT',
+    'WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD',
+    'WS_TRACE_TRANSACTIONS_LIMIT',
+    'WS_EVENTLOG_TRANSACTIONS_LIMIT',
 ];
 
 required_options.forEach((item, i) => {
     if (process.env[item] === undefined) {
         console.error(`Environment option ${item} is not defined`);
+        process.exit(1);
+    }
+    if (numeric_options.includes(item) && isNaN(Number(process.env[item]))) {
+        console.error(`Environment option ${item} should be a number`);
         process.exit(1);
     }
 });
@@ -66,8 +85,6 @@ app.use(`/${process.env.API_PATH_PREFIX}`, router);
 app.get(`/${process.env.API_PATH_PREFIX}`, (req, res) => {
     res.send('Memento API');
 });
-
-dbUtility.CreateConnectionPool();
 
 const port = Number(process.env.SERVER_BIND_PORT) || 12345;
 const bind_ip = process.env.SERVER_BIND_IP || '0.0.0.0';
@@ -110,7 +127,7 @@ function createClusteredServer(ip: string, port: number, clusterSize: number) {
 
 function gracefulExit() {
     console.log('Close DB connection');
-    dbUtility.CloseConnection();
+    sequelize.close();
     process.exit(0);
 }
 
@@ -121,8 +138,8 @@ process.on('uncaughtException', function (error) {
     console.log('uncaughtException ' + error);
 });
 
-process.on('unhandledRejection', function (reason, p) {
-    console.log('unhandledRejection ' + reason);
+process.on('unhandledRejection', (_reason, promise) => {
+    console.error('Unhandled Rejection at:', promise);
 });
 
-module.exports = app;
+export default app;

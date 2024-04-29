@@ -1,21 +1,40 @@
 import { Socket, Server } from 'socket.io';
-import constant from '../../constants/config';
+import constants from '../../constants/config';
 import {
-    onTransactionsHistory,
+    onTransactionHistory,
     getSocketStateActions as getTransactionsHistorySocketStateActions,
-    manageForkTransactionsWriting,
-} from './transactionsHistory';
-import { Args } from './transactionsHistory/types';
+    manageEventLogSaveInState,
+} from './transactionHistory';
+import { Args } from './transactionHistory/types';
+
+const { EVENT } = constants;
 
 function onConnection(socket: Socket, io: Server) {
-    manageForkTransactionsWriting(io.sockets.sockets.size);
+    console.log(
+        `New socket connection: ${socket.id}, currently connected: ${io.sockets.sockets.size}`
+    );
 
-    socket.on(constant.EVENT.TRANSACTIONS_HISTORY, (args: Args) => {
-        onTransactionsHistory(socket, args);
+    const { clearSocketState } = getTransactionsHistorySocketStateActions(
+        socket.id
+    );
+    manageEventLogSaveInState(io.sockets.sockets.size);
+
+    socket.on(EVENT.TRANSACTION_HISTORY, (args: Args) => {
+        console.log(
+            `Client with IP: ${socket.handshake.address} listening for ${EVENT.TRANSACTION_HISTORY} event by accounts:(${args.accounts}).`
+        );
+        onTransactionHistory(socket, args);
     });
-    socket.on(constant.EVENT.DISCONNECT, () => {
-        manageForkTransactionsWriting(io.sockets.sockets.size);
-        getTransactionsHistorySocketStateActions(socket.id).clearSocketState();
+
+    socket.on(EVENT.DISCONNECT, () => {
+        manageEventLogSaveInState(io.sockets.sockets.size);
+        clearSocketState();
+
+        console.log('Socket disconnected:', socket.id);
+    });
+
+    socket.on(EVENT.ERROR, (error) => {
+        console.error('Socket error:', error);
     });
 }
 

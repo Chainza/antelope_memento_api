@@ -152,7 +152,7 @@ The following queries are supported:
 
 ## Web Sockets
 
-The API supports Web Sockets for real-time updates. We use socket.io for the Web Socket interface. The client can subscribe to the `transactions_history` event, which start emitting the transaction data based on the provided parameters.
+The API supports Web Sockets for real-time updates. We use socket.io for the Web Socket interface. The client can subscribe to the `transaction_history` event, which start emitting the transaction data based on the provided parameters.
 
 Example of a client-side javascript code:
 
@@ -169,8 +169,8 @@ const socket = io('https://memento.eu.eosamsterdam.net', {
 socket.on('connect', () => {
     console.log('connected to memento-api websocket');
 
-    // subscribe to the transactions_history event after the connection is established
-    socket.emit('transactions_history', {
+    // subscribe to the transaction_history event after the connection is established
+    socket.emit('transaction_history', {
         accounts: ['account1', 'account2'], // array of account names, required
         start_block: 298284392, // start reading from the block_num, optional (head block is used by default)
         irreversible: true, // only irreversible transactions, optional (false by default)
@@ -182,7 +182,7 @@ socket.on('disconnect', () => {
 });
 
 // start receiving the transaction data
-socket.on('transactions_history', (data, ack) => {
+socket.on('transaction_history', (data, ack) => {
     console.log(data);
     ack(); // acknowledge the receipt of the data, required (otherwise the server will stop sending data)
 });
@@ -192,7 +192,7 @@ socket.on('error', (error) => {
 });
 ```
 
-Example of 'transactions_history' event data:
+Example of 'transaction_history' event data:
 
 ```json
 [
@@ -291,7 +291,9 @@ apt-get install -y nodejs
 git clone https://github.com/Antelope-Memento/antelope_memento_api.git /opt/antelope_memento_api
 cd /opt/antelope_memento_api
 npm ci
+npm run build
 cp systemd/memento_api\@.service /etc/systemd/system/
+systemctl daemon-reload
 
 # example for a WAX MySQL database
 cat >/etc/opt/memento_api_wax.env <<'EOT'
@@ -310,7 +312,7 @@ CPU_CORES = 4
 MAX_RECORD_COUNT = 100
 WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD = 100
 WS_TRACE_TRANSACTIONS_LIMIT = 100
-WS_FORK_TRANSACTIONS_LIMIT = 100
+WS_EVENTLOG_TRANSACTIONS_LIMIT = 100
 
 EOT
 
@@ -334,7 +336,7 @@ CPU_CORES = 4
 MAX_RECORD_COUNT = 100
 WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD = 100
 WS_TRACE_TRANSACTIONS_LIMIT = 100
-WS_FORK_TRANSACTIONS_LIMIT = 100
+WS_EVENTLOG_TRANSACTIONS_LIMIT = 100
 
 EOT
 
@@ -371,7 +373,7 @@ MAX_RECORD_COUNT = 10  // maximum number of records that can be returned in a si
 
 WS_TRACE_TRANSACTIONS_BLOCKS_THRESHOLD = 100 // maximum number of blocks threshold for which transactions will be emitted from websocket
 WS_TRACE_TRANSACTIONS_LIMIT = 100 // maximum number of irreversible transactions which can be emitted from websocket
-WS_FORK_TRANSACTIONS_LIMIT = 100 // maximum number of reversible transactions which can be emitted from websocket
+WS_EVENTLOG_TRANSACTIONS_LIMIT = 100 // maximum number of reversible transactions which can be emitted from websocket
 
 ```
 
