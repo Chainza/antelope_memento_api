@@ -34,27 +34,39 @@ export async function getMaxEventLog(blockNum: number) {
     });
 }
 
-export function webSocketFormat(eventLogs: EventLog[], accounts: string[]) {
+export function webSocketFormat(
+    eventLogs: EventLog[],
+    accounts: string[],
+    lastEventLogId: number,
+    lastCheckedBlock: number
+) {
     const parsedTraces = eventLogs.map(({ data, ...tx }) => ({
         ...tx,
         data: JSON.parse(data.toString('utf8')),
     }));
 
     return parsedTraces
+        .filter((tx) => {
+            if (lastEventLogId >= tx.id || lastCheckedBlock > tx.block_num) {
+                return false;
+            }
+            if (tx.event_type === EventType.fork) return true;
+
+            const hasAccountAmongReceivers = (
+                tx.data.trace.action_traces as { receiver: string }[]
+            ).some(({ receiver }) => accounts.includes(receiver));
+
+            return hasAccountAmongReceivers;
+        })
         .map((tx) => {
             if (tx.event_type === EventType.trace) {
-                const findAcounts = (
-                    tx.data.trace.action_traces as { receiver: string }[]
-                ).some(({ receiver }) => accounts.includes(receiver));
-                if (findAcounts) {
-                    tx.id && delete (tx as { id?: unknown }).id;
-                    tx.event_type &&
-                        delete (tx as { event_type?: unknown }).event_type;
-                    return {
-                        ...tx,
-                        type: 'trace' as const,
-                    };
-                }
+                tx.id && delete (tx as { id?: unknown }).id;
+                tx.event_type &&
+                    delete (tx as { event_type?: unknown }).event_type;
+                return {
+                    ...tx,
+                    type: 'trace' as const,
+                };
             } else {
                 tx.id && delete (tx as { id?: unknown }).id;
                 tx.event_type &&
@@ -65,6 +77,5 @@ export function webSocketFormat(eventLogs: EventLog[], accounts: string[]) {
                     data: null,
                 };
             }
-        })
-        .filter(Boolean);
+        });
 }

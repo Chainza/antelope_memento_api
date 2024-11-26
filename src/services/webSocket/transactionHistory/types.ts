@@ -19,7 +19,7 @@ export interface State {
     eventLog: {
         data: EventLog[];
         lastEventId: number | null;
-        intervalId: NodeJS.Timeout | null;
+        timeoutId: NodeJS.Timeout | null;
     };
 }
 
@@ -28,6 +28,7 @@ export interface SocketState {
     tableType: TableType;
     lastTransactionBlockNum: number;
     lastCheckedBlock: number;
+    lastEventLogId: number;
 }
 
 export interface Args {
