@@ -16,6 +16,7 @@ import {
     switchToTransactionTable,
     validateArgs,
 } from './utils';
+import { io } from '../../../server';
 
 const { EVENT, EVENT_ERRORS } = constants;
 
@@ -27,11 +28,12 @@ export const EVENTLOG_BLOCKS_LIMIT =
     Number(process.env.WS_EVENTLOG_TRANSACTIONS_LIMIT) ?? 100;
 
 export const EMIT_TIMEOUT_TIME = 500; // Time in milliseconds to wait before emitting the next event
-export const EVENTLOG_WRITING_INTERVAL_TIME = 500; // Time in milliseconds to write the EventLog event
+export const EVENTLOG_WRITING_TIMEOUT_TIME = 500; // Time in milliseconds to write the EventLog event
+export const ACKNOWLEDGE_TIME = 5000;
 
 const state: State = {
     connectedSockets: {},
-    eventLog: { data: [], lastEventId: null, intervalId: null }, // EventLog.data represents the EventLog event, which this service will write and emit to the clients when requested
+    eventLog: { data: [], lastEventId: null, timeoutId: null }, // EventLog.data represents the EventLog event, which this service will write and emit to the clients when requested
 };
 
 export function scheduleNextEmit(socket: Socket) {
@@ -40,36 +42,52 @@ export function scheduleNextEmit(socket: Socket) {
     }, EMIT_TIMEOUT_TIME);
 }
 
-function manageEventLogSaveInState(connectionsCount: number) {
-    const shouldWrite = connectionsCount > 0 && !state.eventLog.intervalId;
+function manageEventLogSaveAndEmit(connectionsCount: number) {
+    const shouldWrite = connectionsCount > 0 && !state.eventLog.timeoutId;
 
     // start writing the EventLog event if there are active socket connections
     if (shouldWrite) {
         console.log(
             `Starting to write EventLog event, active connections: ${connectionsCount}`
         );
-        state.eventLog.intervalId = setInterval(async () => {
-            if (
-                // check for any active socket connections with 'EventLog' transaction type
-                !Object.values(state.connectedSockets).find(
-                    ({ tableType }) => tableType === TableType.eventLog
-                )
-            ) {
-                return;
-            }
-
-            try {
-                await saveEventLogInState();
-            } catch (error) {
-                console.error('error writing EventLog event:', error);
-            }
-        }, EVENTLOG_WRITING_INTERVAL_TIME);
+        state.eventLog.timeoutId = setTimeout(
+            saveAndEmitEventLog,
+            EVENTLOG_WRITING_TIMEOUT_TIME
+        );
     }
-    if (!connectionsCount && state.eventLog.intervalId) {
+    if (!connectionsCount && state.eventLog.timeoutId) {
         // stop writing the EventLog event and clear the EventLog state
         // if there are no active socket connections
-        clearInterval(state.eventLog.intervalId);
-        state.eventLog = { data: [], lastEventId: null, intervalId: null };
+        clearTimeout(state.eventLog.timeoutId);
+        state.eventLog = { data: [], lastEventId: null, timeoutId: null };
+        console.log('No connections found. Stop writing EventLog event.');
+    }
+}
+
+async function saveAndEmitEventLog() {
+    if (
+        // check for any active socket connections with 'EventLog' transaction type
+        !Object.values(state.connectedSockets).find(
+            ({ tableType }) => tableType === TableType.eventLog
+        )
+    ) {
+        state.eventLog.timeoutId = setTimeout(
+            saveAndEmitEventLog,
+            EVENTLOG_WRITING_TIMEOUT_TIME
+        );
+        return;
+    }
+
+    try {
+        await saveEventLogInState();
+        emitEventLogsToClients();
+    } catch (error) {
+        console.error('error writing EventLog event:', error);
+    } finally {
+        state.eventLog.timeoutId = setTimeout(
+            saveAndEmitEventLog,
+            EVENTLOG_WRITING_TIMEOUT_TIME
+        );
     }
 }
 
@@ -91,6 +109,9 @@ async function saveEventLogInState() {
         });
 
         if (isNonEmptyArray(EventLogTransactions)) {
+            console.log(
+                `${EventLogTransactions.length} new Event Log events. Writing to state.`
+            );
             state.eventLog = {
                 ...state.eventLog,
                 data: EventLogTransactions,
@@ -107,6 +128,7 @@ function getSocketStateActions(socketId: SocketId) {
         initializeSocketState: (args: Args): void => {
             state.connectedSockets[socketId] = {
                 args,
+                lastEventLogId: 0,
                 lastTransactionBlockNum: 0,
                 lastCheckedBlock: 0,
                 tableType: args.irreversible
@@ -192,6 +214,10 @@ async function emitTransactionHistory(socket: Socket) {
         tableType,
     });
 
+    // if table type is event log and it shouldn't be changed to transaction table, then
+    // return, since event logs are emitted in manageEventLogSaveAndEmit
+    if (tableType === TableType.eventLog && !shouldUseTransactionTable) return;
+
     const shouldUseEventLogTable = switchEventLogTable({
         lastCheckedBlock,
         lastIrreversibleBlock,
@@ -207,8 +233,6 @@ async function emitTransactionHistory(socket: Socket) {
         setSocketState({
             tableType: TableType.transaction,
         });
-        scheduleNextEmit(socket);
-        return;
     }
 
     if (shouldUseEventLogTable) {
@@ -218,11 +242,10 @@ async function emitTransactionHistory(socket: Socket) {
         setSocketState({
             tableType: TableType.eventLog,
         });
-        scheduleNextEmit(socket);
         return;
     }
 
-    emitEventBasedOnType({
+    handleTransactionEventEmit({
         socket,
         accounts,
         startBlock,
@@ -232,7 +255,7 @@ async function emitTransactionHistory(socket: Socket) {
     });
 }
 
-async function emitEventBasedOnType({
+async function handleTransactionEventEmit({
     socket,
     accounts,
     startBlock,
@@ -255,60 +278,49 @@ async function emitEventBasedOnType({
         `emitTransactionBasedOnType: socket state not found for socket: ${socket.id}`
     );
 
-    switch (state.tableType) {
-        case TableType.transaction: {
-            let shouldExecute = true;
+    let shouldExecute = true;
 
-            while (shouldExecute) {
-                const count = await receiptsService.getCount({
+    while (shouldExecute) {
+        const count = await receiptsService.getCount({
+            accounts,
+            fromBlock: startBlock,
+            toBlock: startBlock + TRACE_BLOCKS_THRESHOLD,
+        });
+
+        const threshold = calculateTraceTxsBlockThreshold(count, startBlock);
+
+        let toBlock = irreversible
+            ? Math.min(threshold, lastIrreversibleBlock)
+            : threshold;
+
+        shouldExecute =
+            startBlock <= toBlock &&
+            lastIrreversibleBlock !== toBlock &&
+            toBlock <= headBlock;
+
+        if (count !== 0) {
+            await emitTransactionEvent(socket, {
+                accounts,
+                fromBlock: startBlock,
+                toBlock,
+            });
+        } else if (toBlock <= lastIrreversibleBlock) {
+            const nextBlock = await receiptsService.getNextBlockWithTransaction(
+                {
                     accounts,
                     fromBlock: startBlock,
-                    toBlock: startBlock + TRACE_BLOCKS_THRESHOLD,
-                });
-
-                const threshold = calculateTraceTxsBlockThreshold(
-                    count,
-                    startBlock
-                );
-
-                let toBlock = irreversible
-                    ? Math.min(threshold, lastIrreversibleBlock)
-                    : threshold;
-
-                shouldExecute =
-                    startBlock <= toBlock &&
-                    lastIrreversibleBlock !== toBlock &&
-                    toBlock <= headBlock;
-
-                if (count !== 0) {
-                    await emitTransactionEvent(socket, {
-                        accounts,
-                        fromBlock: startBlock,
-                        toBlock,
-                    });
-                } else if (toBlock <= lastIrreversibleBlock) {
-                    const nextBlock =
-                        await receiptsService.getNextBlockWithTransaction({
-                            accounts,
-                            fromBlock: startBlock,
-                        });
-
-                    toBlock = nextBlock ?? lastIrreversibleBlock;
                 }
+            );
 
-                startBlock = toBlock;
-                setSocketState({
-                    lastCheckedBlock: toBlock,
-                });
-            }
-            scheduleNextEmit(socket);
-            break;
+            toBlock = nextBlock ?? lastIrreversibleBlock;
         }
-        case TableType.eventLog: {
-            emitEventLogEvent(socket, { accounts });
-            break;
-        }
+
+        startBlock = toBlock;
+        setSocketState({
+            lastCheckedBlock: toBlock,
+        });
     }
+    scheduleNextEmit(socket);
 }
 
 async function emitTransactionEvent(
@@ -347,26 +359,56 @@ async function emitTransactionEvent(
     }
 }
 
-async function emitEventLogEvent(
-    socket: Socket,
-    { accounts }: { accounts: Args['accounts'] }
-) {
+async function emitEventLogEvent(socketId: SocketId) {
+    const { setSocketState, clearSocketState, getSocketState } =
+        getSocketStateActions(socketId);
+    const socketState = getSocketState();
+    if (!socketState) {
+        console.log(`Tried to emit EventLog event to socket ${socketId} but could not find the state.`);
+        return;
+    }
+
     const events = eventLogService.webSocketFormat(
         state.eventLog.data,
-        accounts
+        socketState.args.accounts,
+        socketState.lastEventLogId,
+        socketState.lastCheckedBlock
     );
 
-    if (isNonEmptyArray(events)) {
-        socket.emit(EVENT.TRANSACTION_HISTORY, events, () => {
-            scheduleNextEmit(socket);
+    const lastEventLog = state.eventLog.data[0];
+    if (lastEventLog) {
+        setSocketState({
+            lastCheckedBlock: lastEventLog.block_num,
+            lastEventLogId: lastEventLog.id,
         });
-    } else {
-        scheduleNextEmit(socket);
+    }
+
+    if (!isNonEmptyArray(events)) return;
+    console.log(`Socket ${socketId} receives ${events.length} new Event Logs.`);
+
+    // if client does not acknowledge emited event in ACKNOWLEDGE_TIME, disconnect it
+    const disconnectionTimeout = setTimeout(() => {
+        io.in(socketId).disconnectSockets(true);
+        clearSocketState();
+    }, ACKNOWLEDGE_TIME);
+
+    io.to(socketId).emit(EVENT.TRANSACTION_HISTORY, events, () => {
+        clearTimeout(disconnectionTimeout);
+    });
+}
+
+function emitEventLogsToClients() {
+    const eventLogClients = Object.keys(state.connectedSockets);
+
+    for (const socketId of eventLogClients) {
+        if (state.connectedSockets[socketId]?.tableType !== TableType.eventLog)
+            continue;
+        emitEventLogEvent(socketId);
     }
 }
 
 export {
     onTransactionHistory,
     getSocketStateActions,
-    manageEventLogSaveInState,
+    manageEventLogSaveAndEmit,
 };
